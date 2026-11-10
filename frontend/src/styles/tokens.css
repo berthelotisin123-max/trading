@@ -1,0 +1,55 @@
+/* BETZO design tokens — dark theme is the default workspace appearance. */
+:root {
+  --bg: #0b1020;
+  --panel: #111827;
+  --panel2: #1f2937;
+  --line: #374151;
+  --line-hover: #4b5563;
+  --text: #f9fafb;
+  --muted: #9ca3af;
+  --muted-soft: #6b7280;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-soft: rgba(59, 130, 246, 0.12);
+  --primary-strong: rgba(59, 130, 246, 0.1);
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.12);
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.12);
+  --sidebar: #0f172a;
+  --sidebar-card: #111827;
+  --input-bg: #111827;
+  --input-focus-bg: #0f172a;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px -1px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+  --transition: all 0.2s ease;
+}
+
+:root[data-theme='light'] {
+  --bg: #f3f4f8;
+  --panel: #ffffff;
+  --panel2: #f1f5f9;
+  --line: #e2e8f0;
+  --line-hover: #cbd5e1;
+  --text: #0f172a;
+  --muted: #64748b;
+  --muted-soft: #94a3b8;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: rgba(37, 99, 235, 0.1);
+  --primary-strong: rgba(37, 99, 235, 0.08);
+  --success: #059669;
+  --success-soft: rgba(5, 150, 105, 0.1);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.1);
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.1);
+  --sidebar: #f8fafc;
+  --sidebar-card: #ffffff;
+  --input-bg: #ffffff;
+  --input-focus-bg: #ffffff;
+}

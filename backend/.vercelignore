@@ -1,0 +1,13 @@
+# Never ship local env files or virtualenvs to Vercel
+.env
+.env.*
+.venv/
+venv/
+
+# Not needed in the function bundle
+tests/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/

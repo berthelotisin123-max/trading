@@ -1,0 +1,3 @@
+# Build artifacts are regenerated during the Vercel build
+node_modules/
+dist/
