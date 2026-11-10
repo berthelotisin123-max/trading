@@ -11,7 +11,7 @@ from app.core.deps import get_current_user
 from app.core.security import create_access_token, create_refresh_token, decode_token
 from app.db.session import get_db
 from app.models.database import User, UserSession
-from app.schemas import TokenResponse, UserLogin, UserOut, UserRegister
+from app.schemas import TokenResponse, UserLogin, UserOut, UserRegister, UserUpdate
 
 
 router = APIRouter()
@@ -77,19 +77,32 @@ async def logout(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.services.auth import get_active_session, revoke_session
+    """
+    Revoke session(s) for the signed-in user.
 
-    auth = request.headers.get("authorization", "")
-    token = auth[7:] if auth.startswith("Bearer ") else ""
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    Send the stored `refresh_token` in the JSON body to revoke exactly that
+    session. When no body is provided, every active session for the user is
+    revoked (sign out everywhere) — the safe default.
+    """
+    from app.services.auth import get_active_session, revoke_session, revoke_user_sessions
 
-    import hashlib
-    refresh_hash = hashlib.sha256(token.encode()).hexdigest()
-    session = await get_active_session(db, current_user.id, refresh_hash)
-    if session:
-        await revoke_session(db, session)
+    refresh_token = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            refresh_token = body.get("refresh_token")
+    except Exception:
+        # No/invalid body: fall back to revoking all sessions.
+        refresh_token = None
+
+    if refresh_token:
+        import hashlib
+        refresh_hash = hashlib.sha256(str(refresh_token).encode()).hexdigest()
+        session = await get_active_session(db, current_user.id, refresh_hash)
+        if session:
+            await revoke_session(db, session)
+    else:
+        await revoke_user_sessions(db, current_user.id)
 
     return None
 
@@ -116,6 +129,12 @@ async def refresh_token_endpoint(
     except (ValueError, TypeError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
+    # Load the user explicitly: accessing `session.user` after a commit would
+    # trigger a lazy load, which async SQLAlchemy cannot perform here.
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
     import hashlib
     refresh_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
     session = await get_active_session(db, user_id, refresh_hash)
@@ -130,7 +149,7 @@ async def refresh_token_endpoint(
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
     await create_user_session(
         db,
-        session.user,
+        user,
         hashlib.sha256(new_refresh_token.encode()).hexdigest(),
         expires_at,
         user_agent=request.headers.get("user-agent"),
@@ -144,4 +163,18 @@ async def refresh_token_endpoint(
 async def get_current_user_profile(
     current_user: User = Depends(get_current_user),
 ):
+    return current_user
+
+
+@router.patch("/users/me", response_model=UserOut)
+async def update_current_user_profile(
+    user_in: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the signed-in user's profile (currently: display name)."""
+    if user_in.name is not None:
+        current_user.name = user_in.name
+        await db.commit()
+        await db.refresh(current_user)
     return current_user

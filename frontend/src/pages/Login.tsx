@@ -2,14 +2,13 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { isOffline } from '../lib/api';
 
 export default function Login() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [message, setMessage] = useState(
-    'Use the preview account created in this browser. This is not production authentication.',
-  );
+  const [message, setMessage] = useState('Sign in with your BETZO account to open your workspace.');
   const [busy, setBusy] = useState(false);
 
   const from = (location.state as { from?: string } | null)?.from;
@@ -28,10 +27,14 @@ export default function Login() {
         setMessage('Signed in. Opening your workspace…');
         navigate(from && from !== '/welcome' ? from : '/overview', { replace: true });
       } else {
-        setMessage('Incorrect email or password for the preview account stored in this browser.');
+        setMessage('Incorrect email or password.');
       }
-    } catch {
-      setMessage('Sign-in failed. This browser blocked the cryptography API; serve the app from localhost or HTTPS.');
+    } catch (error) {
+      setMessage(
+        isOffline(error)
+          ? 'Could not reach the BETZO backend. Check your connection and try again.'
+          : 'Sign-in failed. Please try again in a moment.',
+      );
     } finally {
       setBusy(false);
     }

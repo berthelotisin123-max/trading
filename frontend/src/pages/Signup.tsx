@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { evaluatePasswordRules, passwordMeetsRules } from '../lib/auth';
+import { ApiError, isOffline } from '../lib/api';
 
 const DEFAULT_RULES = evaluatePasswordRules('');
 
@@ -11,7 +12,7 @@ export default function Signup() {
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState(
-    'Your password is not sent. A salted password verifier is kept only in this browser for this prototype.',
+    'Your password is sent over HTTPS to the BETZO backend and stored as a salted bcrypt hash.',
   );
   const [busy, setBusy] = useState(false);
 
@@ -40,8 +41,14 @@ export default function Signup() {
       await signUp(name, email, pwd);
       setMessage('Account created. Sign in to open your workspace.');
       navigate('/login', { replace: true, state: { registered: true } });
-    } catch {
-      setMessage('Sign-up failed. This browser blocked the cryptography API; serve the app from localhost or HTTPS.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setMessage(error.message);
+      } else if (isOffline(error)) {
+        setMessage('Could not reach the BETZO backend. Check your connection and try again.');
+      } else {
+        setMessage('Sign-up failed. Please try again in a moment.');
+      }
     } finally {
       setBusy(false);
     }
@@ -56,8 +63,8 @@ export default function Signup() {
             <div className="eyebrow" style={{ marginTop: 18 }}>Start your workspace</div>
             <h1 style={{ margin: '4px 0 6px' }}>Create account</h1>
             <p className="muted" style={{ marginTop: 0 }}>
-              Create a preview account stored in this browser so you can sign in later.
-              Production account security still requires the BETZO backend.
+              Create a BETZO account on the production backend. Your credentials are verified server-side, and you
+              can sign in from any device.
             </p>
             <form className="auth-form" onSubmit={handleSubmit}>
               <label>

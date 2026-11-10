@@ -95,6 +95,22 @@ async def revoke_session(db: AsyncSession, session: UserSession) -> None:
     await db.commit()
 
 
+async def revoke_user_sessions(db: AsyncSession, user_id: UUID) -> None:
+    """Revoke every active session belonging to a user."""
+    from datetime import datetime, timezone
+
+    result = await db.execute(
+        select(UserSession).where(
+            UserSession.user_id == user_id,
+            UserSession.revoked_at.is_(None),
+        )
+    )
+    now = datetime.now(timezone.utc)
+    for session in result.scalars().all():
+        session.revoked_at = now
+    await db.commit()
+
+
 # --- Instruments ---
 
 async def get_instruments(

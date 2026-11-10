@@ -6,6 +6,7 @@ import { useTheme } from '../context/ThemeContext';
 import type { Theme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import { getPreviewAccount, readPreviewProfile, updatePreviewAccountName, writePreviewProfile } from '../lib/auth';
+import { ApiError, isOffline } from '../lib/api';
 
 export default function Profile() {
   const { profile, refreshProfile, signOut } = useAuth();
@@ -28,12 +29,26 @@ export default function Profile() {
   const email = account?.email ?? profile.email ?? '';
   const initial = (name.trim().charAt(0) || 'B').toUpperCase();
 
-  const handleSave = (event: FormEvent<HTMLFormElement>) => {
+  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    updatePreviewAccountName(name);
-    refreshProfile();
-    setMessage('Profile details saved in this browser.');
-    toast('Profile saved locally.');
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setMessage('Name cannot be empty.');
+      return;
+    }
+    try {
+      await updatePreviewAccountName(trimmed);
+      refreshProfile();
+      setMessage('Profile details saved to your BETZO account.');
+      toast('Profile saved.');
+    } catch (error) {
+      if (isOffline(error)) {
+        setMessage('Could not reach the BETZO backend. Check your connection and try again.');
+      } else {
+        setMessage(error instanceof ApiError ? error.message : 'Could not save your profile.');
+      }
+      toast('Profile could not be saved.');
+    }
   };
 
   const handlePhotoChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -86,7 +101,7 @@ export default function Profile() {
 
   const handleLogout = () => {
     signOut();
-    toast('You have logged out of the preview session.');
+    toast('You have been signed out.');
     navigate('/welcome', { replace: true });
   };
 
@@ -96,7 +111,7 @@ export default function Profile() {
         <div>
           <div className="eyebrow">Account</div>
           <h1>Profile &amp; preferences</h1>
-          <p>Manage this preview profile and workspace appearance for this browser.</p>
+          <p>Manage your BETZO account details and workspace appearance.</p>
         </div>
       </div>
 
@@ -105,9 +120,9 @@ export default function Profile() {
           <div className="card-head">
             <div>
               <h2>Profile details</h2>
-              <p>Preview profile only; data stays in this browser.</p>
+              <p>Your name and email live on the BETZO backend and sync across devices.</p>
             </div>
-            <span className="tag neutral">Demo account</span>
+            <span className="tag neutral">BETZO account</span>
           </div>
 
           <div className="profile-photo-row">
@@ -168,7 +183,8 @@ export default function Profile() {
           </div>
           <p className="muted" style={{ marginTop: 14 }}>Current theme: {theme}</p>
           <div className="catalog-note" style={{ margin: 0 }}>
-            Theme preference is stored locally. Profile and appearance settings are not synced between devices in this preview.
+            Theme preference is stored in this browser. Profile details are saved to your account and follow you
+            between devices.
           </div>
         </div>
       </div>
@@ -190,13 +206,14 @@ export default function Profile() {
         <div className="card-head">
           <div>
             <h2>Session</h2>
-            <p>End this signed-in preview session.</p>
+            <p>End this signed-in session.</p>
           </div>
-          <span className="tag warn">Browser preview</span>
+          <span className="tag warn">Signed in</span>
         </div>
         <button className="btn" type="button" onClick={handleLogout}>Log out</button>
         <p className="muted" style={{ marginTop: 10 }}>
-          Logging out returns you to the welcome page. Your preview account remains stored in this browser so you can sign in again.
+          Logging out returns you to the welcome page and revokes this session on the server. Your BETZO account
+          stays intact, so you can sign in again from any device.
         </p>
       </div>
     </>

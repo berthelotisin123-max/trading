@@ -1,23 +1,25 @@
 /**
- * Browser-local preview authentication.
+ * Authentication for BETZO.
  *
- * This is NOT production authentication: it has no server, no verified email,
- * no reset service, and no protection against a local attacker with device
- * access. It exists so the prototype can gate the workspace and persist a
- * sample account between visits on the same browser. Raw passwords are never
- * stored — only a salted PBKDF2 (SHA-256, 210,000 iterations) verifier.
+ * Credentials are verified by the FastAPI backend (`/api/v1/auth/*`) against
+ * the PostgreSQL database — passwords never touch this browser. On a
+ * successful sign-in the returned JWT pair is stored here and used to
+ * authenticate subsequent API calls.
+ *
+ * Two things remain browser-local by design:
+ *  - the cached profile snapshot (so the UI can render synchronously), and
+ *  - the profile photo (a resized data URL; there is no avatar upload API yet).
  */
 
-const ACCOUNT_KEY = 'betzoPreviewAccount';
+import { apiLogin, apiLogout, apiMe, apiRegister, apiUpdateProfile, clearTokens, isBadCredentials, readTokens, writeTokens } from './api';
+import type { ApiUser } from './api';
+
+const ACCOUNT_KEY = 'betzoAccount';
 const PROFILE_KEY = 'betzoProfile';
-const SESSION_KEY = 'betzoPreviewAuth';
-const PBKDF2_ITERATIONS = 210_000;
 
 export interface PreviewAccount {
   name: string;
   email: string;
-  salt: string;
-  verifier: string;
   createdAt: string;
 }
 
@@ -49,44 +51,9 @@ export function passwordMeetsRules(password: string): boolean {
   return PASSWORD_RULES.every(({ check }) => check(password));
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
-  const bytes = new Uint8Array(Math.floor(hex.length / 2));
-  for (let i = 0; i < bytes.length; i += 1) {
-    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
-}
-
-export async function derivePreviewVerifier(password: string, saltHex: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: hexToBytes(saltHex), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
-    key,
-    256,
-  );
-  return bytesToHex(new Uint8Array(bits));
-}
-
-function readAccount(): PreviewAccount | null {
-  try {
-    const raw = localStorage.getItem(ACCOUNT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PreviewAccount;
-    if (!parsed?.email || !parsed?.salt || !parsed?.verifier) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export function getPreviewAccount(): PreviewAccount | null {
-  return readAccount();
-}
+// ---------------------------------------------------------------------------
+// Cached profile (rendered synchronously, refreshed from the API)
+// ---------------------------------------------------------------------------
 
 export function readPreviewProfile(): PreviewProfile {
   try {
@@ -104,61 +71,136 @@ export function writePreviewProfile(profile: PreviewProfile): void {
   }
 }
 
-export async function registerPreviewAccount(name: string, email: string, password: string): Promise<void> {
-  const saltBytes = crypto.getRandomValues(new Uint8Array(16));
-  const salt = bytesToHex(saltBytes);
-  const verifier = await derivePreviewVerifier(password, salt);
-  const account: PreviewAccount = {
-    name: name.trim(),
-    email: email.trim().toLowerCase(),
-    salt,
-    verifier,
-    createdAt: new Date().toISOString(),
-  };
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
-  writePreviewProfile({ ...readPreviewProfile(), name: account.name, email: account.email });
-}
-
-export async function verifyPreviewAccount(email: string, password: string): Promise<PreviewAccount | null> {
-  const account = readAccount();
-  if (!account) return null;
-  if (account.email !== email.trim().toLowerCase()) return null;
-  const candidate = await derivePreviewVerifier(password, account.salt);
-  return candidate === account.verifier ? account : null;
-}
-
-export function updatePreviewAccountName(name: string): PreviewAccount | null {
-  const account = readAccount();
-  if (account) {
-    account.name = name.trim();
-    try {
-      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
-    } catch {
-      /* storage unavailable */
-    }
-  }
-  const profile = readPreviewProfile();
-  writePreviewProfile({ ...profile, name: name.trim(), email: account?.email ?? profile.email });
-  return account;
-}
-
-export function isPreviewSignedIn(): boolean {
+function readAccount(): PreviewAccount | null {
   try {
-    return sessionStorage.getItem(SESSION_KEY) === '1';
+    const raw = localStorage.getItem(ACCOUNT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PreviewAccount;
+    if (!parsed?.email) return null;
+    return parsed;
   } catch {
-    return false;
+    return null;
   }
 }
 
-export function setPreviewSignedIn(value: boolean): void {
+function writeAccount(account: PreviewAccount): void {
   try {
-    if (value) sessionStorage.setItem(SESSION_KEY, '1');
-    else sessionStorage.removeItem(SESSION_KEY);
+    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
   } catch {
     /* storage unavailable */
   }
 }
 
+/** Cache the server's user record so the UI can render without a round trip. */
+function cacheFromUser(user: ApiUser, extra: Partial<PreviewProfile> = {}): PreviewAccount {
+  const account: PreviewAccount = {
+    name: user.name ?? '',
+    email: user.email,
+    createdAt: user.created_at,
+  };
+  writeAccount(account);
+  const profile = readPreviewProfile();
+  writePreviewProfile({ ...profile, ...extra, name: account.name, email: account.email });
+  return account;
+}
+
+export function getPreviewAccount(): PreviewAccount | null {
+  return readAccount();
+}
+
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
+
+export function isPreviewSignedIn(): boolean {
+  return readTokens() !== null;
+}
+
+export function setPreviewSignedIn(value: boolean): void {
+  if (!value) clearTokens();
+}
+
 export function clearPreviewSession(): void {
-  setPreviewSignedIn(false);
+  clearTokens();
+}
+
+/**
+ * Validate a stored session against the backend on app load.
+ *
+ * Returns `true` when the cached session should be kept. A definitive rejection
+ * clears the session; a network failure keeps it so a flaky connection does not
+ * silently sign the user out.
+ */
+export async function bootstrapSession(): Promise<boolean> {
+  if (!readTokens()) return false;
+  try {
+    const user = await apiMe();
+    cacheFromUser(user);
+    return true;
+  } catch (error) {
+    if (isBadCredentials(error)) {
+      clearTokens();
+      return false;
+    }
+    return true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+/** Create an account on the backend. Does not start a session. */
+export async function registerPreviewAccount(name: string, email: string, password: string): Promise<void> {
+  const tokens = await apiRegister(name, email, password.trim());
+  // The prototype returns the user to the sign-in page after signing up, so
+  // the freshly issued tokens are discarded rather than stored.
+  void tokens;
+  clearTokens();
+  const profile = readPreviewProfile();
+  writePreviewProfile({ ...profile, name: name.trim(), email: email.trim().toLowerCase() });
+}
+
+/**
+ * Verify credentials against the backend and start a session.
+ * Returns `null` when the credentials are rejected; throws otherwise
+ * (network failure, backend unavailable).
+ */
+export async function verifyPreviewAccount(email: string, password: string): Promise<PreviewAccount | null> {
+  let tokens;
+  try {
+    tokens = await apiLogin(email.trim().toLowerCase(), password);
+  } catch (error) {
+    if (isBadCredentials(error)) return null;
+    throw error;
+  }
+  writeTokens(tokens);
+
+  try {
+    const user = await apiMe();
+    return cacheFromUser(user);
+  } catch {
+    // Sign-in succeeded but the profile fetch failed: fall back to what we know.
+    const account: PreviewAccount = {
+      name: '',
+      email: email.trim().toLowerCase(),
+      createdAt: new Date().toISOString(),
+    };
+    writeAccount(account);
+    const profile = readPreviewProfile();
+    writePreviewProfile({ ...profile, email: account.email });
+    return account;
+  }
+}
+
+/** Persist a new display name on the backend, then refresh the local cache. */
+export async function updatePreviewAccountName(name: string): Promise<PreviewAccount | null> {
+  const user = await apiUpdateProfile({ name: name.trim() });
+  return cacheFromUser(user);
+}
+
+/** Revoke the session server-side (best effort) and clear local tokens. */
+export async function endPreviewSession(): Promise<void> {
+  await apiLogout();
+  clearTokens();
 }

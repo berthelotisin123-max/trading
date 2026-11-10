@@ -53,6 +53,21 @@ class UserOut(BaseModel):
         from_attributes = True
 
 
+class UserUpdate(BaseModel):
+    """Fields a signed-in user may change on their own profile."""
+
+    name: Optional[str] = Field(None, max_length=255)
+
+    @validator("name")
+    def _validate_name(cls, v):
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Name cannot be empty")
+        return cleaned
+
+
 # --- Instruments ---
 
 class InstrumentOut(BaseModel):

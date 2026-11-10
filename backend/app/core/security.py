@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from uuid import uuid4
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -37,6 +38,9 @@ def create_access_token(
 
     payload: Dict[str, Any] = {
         "sub": subject,
+        # Unique ID: without it, two tokens minted in the same second for the
+        # same user are byte-identical, which breaks refresh-token rotation.
+        "jti": str(uuid4()),
         "iat": now,
         "exp": expire,
         "type": "access",
@@ -54,6 +58,7 @@ def create_refresh_token(subject: str) -> str:
 
     payload: Dict[str, Any] = {
         "sub": subject,
+        "jti": str(uuid4()),
         "iat": now,
         "exp": expire,
         "type": "refresh",
